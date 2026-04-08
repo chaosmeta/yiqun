@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 // ═══════════════════════════════════════════════════════════════
-//  DiamondVault v4 — 钻石手等级算力分红合约（分批持仓版）
+//  DiamondVault v4 — 蚁群算力分红合约（分批持仓版）
 //  BSC Mainnet
 //
 //  算力公式：总算力 = Σ(每批持仓算力)
@@ -41,14 +41,12 @@ abstract contract Ownable is Context {
 
     function owner() public view returns (address) { return _owner; }
 
-    /// @notice 转移所有权给新地址
     function transferOwnership(address newOwner) external onlyOwner {
         require(newOwner != address(0), "Zero address");
         emit OwnershipTransferred(_owner, newOwner);
         _owner = newOwner;
     }
 
-    /// @notice 放弃所有权，合约将永久无主（不可逆！）
     function renounceOwnership() external onlyOwner {
         emit OwnershipTransferred(_owner, address(0));
         _owner = address(0);
@@ -91,14 +89,16 @@ contract DiamondVault is Ownable, ReentrancyGuard {
     uint256 public constant MAIN_REWARD_INTERVAL    = 2 hours;
     uint256 public constant DIAMOND_REWARD_INTERVAL = 48 hours;
     uint256 public constant MAX_POSITIONS           = 50;
-    address public constant DEAD = 0x000000000000000000000000000000000000dEaD;
+    address public constant DEAD                    = 0x000000000000000000000000000000000000dEaD;
+
+    // BSC Mainnet PancakeSwap Router v2（写死，无需构造函数传入）
+    address public constant PANCAKE_ROUTER = 0x10ED43C718714eb63d5aA57B78B54704E256024E;
 
     uint256[10] public LEVEL_HOURS      = [0, 24, 60, 96, 132, 168, 228, 288, 348, 408];
     uint256[10] public LEVEL_MULTIPLIER = [10, 11, 12, 13, 14, 16, 18, 20, 22, 25];
 
     // ─── 地址 ─────────────────────────────────────────────────
     address public token;
-    address public pancakeRouter;
 
     // ─── 分批持仓结构 ─────────────────────────────────────────
     struct Position {
@@ -147,9 +147,8 @@ contract DiamondVault is Ownable, ReentrancyGuard {
     event DiaRewardReceived(uint256 amount);
     event BuybackReceived(uint256 amount);
 
-    // BSC Mainnet PancakeSwap Router v2: 0x10ED43C718714eb63d5aA57B78B54704E256024E
-    constructor(address _router) Ownable(msg.sender) {
-        pancakeRouter = _router;
+    // ★ 构造函数无参数，直接部署即可
+    constructor() Ownable(msg.sender) {
         lastMainDistributeTime = block.timestamp;
         lastDiaDistributeTime  = block.timestamp;
     }
@@ -385,11 +384,11 @@ contract DiamondVault is Ownable, ReentrancyGuard {
     // ═══════════════════════════════════════════════════════════
 
     function _doBuybackBurn(uint256 bnbAmount) internal {
-        if (bnbAmount == 0 || token == address(0) || pancakeRouter == address(0)) return;
+        if (bnbAmount == 0 || token == address(0)) return;
         address[] memory path = new address[](2);
-        path[0] = IPancakeRouter02(pancakeRouter).WETH();
+        path[0] = IPancakeRouter02(PANCAKE_ROUTER).WETH();
         path[1] = token;
-        try IPancakeRouter02(pancakeRouter).swapExactETHForTokensSupportingFeeOnTransferTokens{
+        try IPancakeRouter02(PANCAKE_ROUTER).swapExactETHForTokensSupportingFeeOnTransferTokens{
             value: bnbAmount
         }(0, path, DEAD, block.timestamp + 300) {
             totalBuybackBurned += bnbAmount;
@@ -513,10 +512,6 @@ contract DiamondVault is Ownable, ReentrancyGuard {
         token = _token;
     }
 
-    function setPancakeRouter(address _router) external onlyOwner {
-        pancakeRouter = _router;
-    }
-
     function setBlacklist(address account, bool status) external onlyOwner {
         blacklisted[account] = status;
     }
@@ -528,7 +523,6 @@ contract DiamondVault is Ownable, ReentrancyGuard {
         _doBuybackBurn(msg.value);
     }
 
-    /// @notice 紧急提取 BNB（防资金永久锁死）
     function emergencyWithdraw(uint256 amount) external onlyOwner {
         (bool sent,) = owner().call{value: amount}("");
         require(sent, "Transfer failed");
