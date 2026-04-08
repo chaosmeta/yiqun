@@ -1,9 +1,9 @@
 // src/components/FeePanel.jsx
 export function FeePanel() {
   const items = [
-    { icon: '🔥', pct: '25%', label: '回购销毁', sub: '持续通缩 · 流通越来越少', color: 'red' },
-    { icon: '💰', pct: '62%', label: '主分红池', sub: '每2小时分发 · 全部持有者',  color: 'blue' },
-    { icon: '💎', pct: '13%', label: '钻石王者池', sub: '每48小时 · 仅Lv10享有', color: 'diamond' },
+    { icon: '🔥', pct: '25%', label: '回购销毁',   sub: '持续通缩 · 蚁群越来越少',  color: 'red'     },
+    { icon: '💰', pct: '62%', label: '主分红池',   sub: '每2小时分发 · 全部持有者', color: 'blue'    },
+    { icon: '🐜', pct: '13%', label: '蚁后专属池', sub: '每48小时 · 仅Lv10享有',   color: 'diamond' },
   ]
   return (
     <div className="panel fee-panel">

@@ -10,7 +10,7 @@ export function LevelTable() {
 
   return (
     <div className="panel">
-      <div className="panel-title"><span>🏅</span> 钻石手等级系统</div>
+      <div className="panel-title"><span>🏅</span> 蚁群等级系统</div>
 
       <table className="lv-table">
         <thead>
@@ -21,19 +21,21 @@ export function LevelTable() {
           </tr>
         </thead>
         <tbody>
-          {LEVEL_DATA.map(({ lv, name, hours, mult }) => {
-            const isActive = isConnected && currentLv === lv
-            const isDiamond = lv === 10
+          {LEVEL_DATA.map(({ lv, name, minHours, mult }) => {
+            const isActive  = isConnected && currentLv === lv
+            const isQueen   = lv === 10
             return (
               <tr key={lv} className={isActive ? 'row-active' : ''}>
-                <td className={isDiamond ? 'diamond-cell' : ''}>
-                  Lv{lv} {name}
+                <td className={isQueen ? 'diamond-cell' : ''}>
+                  {name}
                   {isActive && <span className="you-badge">← 你</span>}
                 </td>
-                <td className="td-hours">{hours}</td>
+                <td className="td-hours">
+                  {lv === 1 ? '0h' : lv < 10 ? `${minHours}h` : `${minHours}h+`}
+                </td>
                 <td>
-                  <span className={`mult-chip ${isDiamond ? 'chip-diamond' : ''}`}>
-                    ×{mult.toFixed(1)}{isDiamond ? ' 💎' : ''}
+                  <span className={`mult-chip ${isQueen ? 'chip-diamond' : ''}`}>
+                    ×{mult.toFixed(1)}{isQueen ? ' 🐜' : ''}
                   </span>
                 </td>
               </tr>
@@ -43,8 +45,8 @@ export function LevelTable() {
       </table>
 
       <div className="info-box" style={{ marginTop: 16 }}>
-        💎 <strong>钻石王者专属：</strong>每48小时额外分得13%分红池<br />
-        🔥 持币上限算力：500万 DMD（防巨鲸垄断）<br />
+        🐜 <strong>蚁后专属：</strong>每48小时额外分得13%分红池<br />
+        🔥 持币上限算力：500万蚁群（防巨鲸垄断）<br />
         📊 算力 = min(持币, 500万) × 等级倍率 × 持有小时数
       </div>
     </div>

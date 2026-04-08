@@ -6,27 +6,12 @@ import { fmt, LEVEL_DATA, LEVEL_THRESHOLDS } from '../utils'
 import { useEffect, useState } from 'react'
 
 // getUserInfo 返回顺序（AntVault v5/v6）:
-// [0] totalBalance_
-// [1] level_
-// [2] oldestHeldHours_
-// [3] power_
-// [4] pendingMain_
-// [5] pendingDia_
-// [6] totalClaimed_
-// [7] positionCount_
-//
-// getLevelInfo 返回顺序:
-// [0] level_
-// [1] levelName_
-// [2] multiplier_
-// [3] heldHours_
-// [4] nextLevelHours_
-//
-// getGlobalStats 返回顺序:
-// [0] totalPower_  ... [6] activeUsers_ ...
+// [0] totalBalance_  [1] level_  [2] oldestHeldHours_  [3] power_
+// [4] pendingMain_   [5] pendingDia_  [6] totalClaimed_  [7] positionCount_
+// getLevelInfo: [0] level_  [1] levelName_  [2] multiplier_  [3] heldHours_  [4] nextLevelHours_
+// getGlobalStats: [0] totalPower_ ...
 
 function LevelBadge({ lv }) {
-  const info = LEVEL_DATA[lv - 1] || LEVEL_DATA[0]
   const isDiamond = lv >= 7
   return (
     <div className={`level-badge ${isDiamond ? 'diamond' : ''}`}>
@@ -60,7 +45,7 @@ function LvProgress({ heldHours, lv }) {
 }
 
 export function UserPanel() {
-  const { address, isConnected } = useAccount()
+  const { isConnected } = useAccount()
   const { userInfo, levelInfo, tokenBal, isRegistered, isLoading, refetch } = useUserInfo()
   const { stats: globalStats } = useGlobalStats()
   const { register, claim, syncBalance, isPending, isConfirming, isSuccess } = useVaultWrite()
@@ -75,11 +60,10 @@ export function UserPanel() {
   }, [isSuccess])
 
   useEffect(() => {
-    if (isPending)     setToast({ msg: '等待钱包签名…', type: 'info' })
+    if (isPending)         setToast({ msg: '等待钱包签名…', type: 'info' })
     else if (isConfirming) setToast({ msg: '链上确认中…',   type: 'info' })
   }, [isPending, isConfirming])
 
-  // ── Not connected ──────────────────────────────────────────
   if (!isConnected) {
     return (
       <div className="panel user-panel">
@@ -93,7 +77,6 @@ export function UserPanel() {
     )
   }
 
-  // ── Loading ────────────────────────────────────────────────
   if (isLoading) {
     return (
       <div className="panel user-panel">
@@ -103,7 +86,6 @@ export function UserPanel() {
     )
   }
 
-  // ── Not registered ─────────────────────────────────────────
   if (!isRegistered) {
     const hasBal = tokenBal && tokenBal > 0n
     return (
@@ -112,7 +94,7 @@ export function UserPanel() {
         {hasBal ? (
           <div className="register-cta">
             <div className="rc-icon">🚀</div>
-            <p>你持有 <strong className="hl">{fmt.token(tokenBal)} DMD</strong></p>
+            <p>你持有 <strong className="hl">{fmt.token(tokenBal)} 蚁群</strong></p>
             <p className="sub">注册参与算力分红系统</p>
             <button
               className="btn btn-primary"
@@ -126,7 +108,7 @@ export function UserPanel() {
         ) : (
           <div className="register-cta">
             <div className="rc-icon">💸</div>
-            <p className="sub">你尚未持有 DMD 代币</p>
+            <p className="sub">你尚未持有蚁群代币</p>
             <p className="sub2">在 PancakeSwap 购买后即可注册</p>
           </div>
         )}
@@ -135,8 +117,6 @@ export function UserPanel() {
     )
   }
 
-  // ── Registered ────────────────────────────────────────────
-  // getUserInfo: [totalBalance, level, oldestHeldHours, power, pendingMain, pendingDia, totalClaimed, positionCount]
   const balance   = userInfo?.[0] ?? 0n
   const lv        = userInfo ? Number(userInfo[1]) : 1
   const heldHours = userInfo?.[2] ?? 0n
@@ -145,11 +125,9 @@ export function UserPanel() {
   const pendDia   = userInfo?.[5] ?? 0n
   const claimed   = userInfo?.[6] ?? 0n
 
-  // getLevelInfo: [level, levelName, multiplier, heldHours, nextLevelHours]
   const lvName = levelInfo?.[1] ?? '—'
   const mult   = levelInfo ? Number(levelInfo[2]) : 10
 
-  // getGlobalStats: [totalPower, mainPool, diaPool, ...]
   const totalPower = globalStats?.[0] ?? 0n
   const sharePct   = totalPower > 0n && power > 0n
     ? ((Number(power) / Number(totalPower)) * 100).toFixed(2)
@@ -161,7 +139,6 @@ export function UserPanel() {
     <div className="panel user-panel">
       <div className="panel-title"><span>👤</span> 我的账户</div>
 
-      {/* Level Row */}
       <div className="level-row">
         <LevelBadge lv={lv} />
         <div className="level-info">
@@ -171,12 +148,11 @@ export function UserPanel() {
         </div>
       </div>
 
-      {/* Data rows */}
       <div className="data-rows">
         {[
-          { label: '持币数量',     val: fmt.token(balance) + ' DMD',  cls: 'blue' },
-          { label: '我的算力',     val: fmt.power(power),             cls: 'gold' },
-          { label: '全网算力占比', val: sharePct + '%',               cls: 'gold' },
+          { label: '持币数量',     val: fmt.token(balance) + ' 蚁群', cls: 'blue'  },
+          { label: '我的算力',     val: fmt.power(power),             cls: 'gold'  },
+          { label: '全网算力占比', val: sharePct + '%',               cls: 'gold'  },
           { label: '历史总领取',   val: fmt.bnb(claimed) + ' BNB',   cls: 'green' },
         ].map(r => (
           <div className="dr" key={r.label}>
@@ -186,7 +162,6 @@ export function UserPanel() {
         ))}
       </div>
 
-      {/* Reward Cards */}
       <div className="reward-grid">
         <div className="reward-card main-card">
           <div className="rc-label">主分红待领</div>
@@ -200,7 +175,6 @@ export function UserPanel() {
         </div>
       </div>
 
-      {/* Actions */}
       <div className="btn-row">
         <button
           className="btn btn-gold"
