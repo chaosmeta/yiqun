@@ -5,9 +5,7 @@ pragma solidity ^0.8.20;
 //  DiamondVault v4 — 钻石手等级算力分红合约（分批持仓版）
 //  BSC Mainnet
 //
-//  核心修复：分批算力计算
-//  第一笔买入 + 第二笔买入，各自独立计时，算力分别累积再求和
-//  总算力 = Σ(每批持仓算力)
+//  算力公式：总算力 = Σ(每批持仓算力)
 //  每批算力 = min(该批数量, 剩余可用封顶额度) × 等级倍率 × 该批持有小时数
 //
 //  等级系统（10级，按最早一批持有时间升级）：
@@ -33,16 +31,27 @@ abstract contract Context {
 abstract contract Ownable is Context {
     address private _owner;
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
     constructor(address initialOwner) {
         _owner = initialOwner;
         emit OwnershipTransferred(address(0), initialOwner);
     }
+
     modifier onlyOwner() { require(_owner == _msgSender(), "Not owner"); _; }
+
     function owner() public view returns (address) { return _owner; }
+
+    /// @notice 转移所有权给新地址
     function transferOwnership(address newOwner) external onlyOwner {
         require(newOwner != address(0), "Zero address");
         emit OwnershipTransferred(_owner, newOwner);
         _owner = newOwner;
+    }
+
+    /// @notice 放弃所有权，合约将永久无主（不可逆！）
+    function renounceOwnership() external onlyOwner {
+        emit OwnershipTransferred(_owner, address(0));
+        _owner = address(0);
     }
 }
 
@@ -77,33 +86,30 @@ interface IPancakeRouter02 {
 contract DiamondVault is Ownable, ReentrancyGuard {
 
     // ─── 常量 ─────────────────────────────────────────────────
-    uint256 public constant PRECISION              = 1e18;
-    uint256 public constant MAX_WEIGHT_BALANCE     = 5_000_000 * 1e18; // 500万封顶
-    uint256 public constant MAIN_REWARD_INTERVAL   = 2 hours;
+    uint256 public constant PRECISION               = 1e18;
+    uint256 public constant MAX_WEIGHT_BALANCE      = 5_000_000 * 1e18;
+    uint256 public constant MAIN_REWARD_INTERVAL    = 2 hours;
     uint256 public constant DIAMOND_REWARD_INTERVAL = 48 hours;
-    uint256 public constant MAX_POSITIONS          = 50; // 每人最多50批持仓
+    uint256 public constant MAX_POSITIONS           = 50;
     address public constant DEAD = 0x000000000000000000000000000000000000dEaD;
 
-    // 等级阈值（小时）
-    uint256[10] public LEVEL_HOURS       = [0, 24, 60, 96, 132, 168, 228, 288, 348, 408];
-    // 等级倍率（×10精度）: 1.0 1.1 1.2 1.3 1.4 1.6 1.8 2.0 2.2 2.5
-    uint256[10] public LEVEL_MULTIPLIER  = [10, 11, 12, 13, 14, 16, 18, 20, 22, 25];
+    uint256[10] public LEVEL_HOURS      = [0, 24, 60, 96, 132, 168, 228, 288, 348, 408];
+    uint256[10] public LEVEL_MULTIPLIER = [10, 11, 12, 13, 14, 16, 18, 20, 22, 25];
 
     // ─── 地址 ─────────────────────────────────────────────────
     address public token;
     address public pancakeRouter;
 
     // ─── 分批持仓结构 ─────────────────────────────────────────
-    // 每次买入记录为独立的一批，算力分开计算
     struct Position {
-        uint256 amount;    // 该批买入数量
-        uint256 startTime; // 该批买入时间戳
+        uint256 amount;
+        uint256 startTime;
     }
 
     struct UserInfo {
-        Position[] positions;  // 所有批次持仓
-        uint8   level;             // 降级后保留的等级下限（惩罚用）
-        uint256 totalBalance;      // 所有批次之和（冗余存储，省gas）
+        Position[] positions;
+        uint8   level;
+        uint256 totalBalance;
         uint256 pendingMainReward;
         uint256 pendingDiaReward;
         uint256 totalClaimed;
@@ -127,7 +133,6 @@ contract DiamondVault is Ownable, ReentrancyGuard {
     uint256 public mainAccPerPower;
     uint256 public diaAccPerPower;
 
-    // ─── 黑名单 ───────────────────────────────────────────────
     mapping(address => bool) public blacklisted;
 
     // ─── Events ───────────────────────────────────────────────
@@ -142,7 +147,7 @@ contract DiamondVault is Ownable, ReentrancyGuard {
     event DiaRewardReceived(uint256 amount);
     event BuybackReceived(uint256 amount);
 
-    // ─── Constructor ──────────────────────────────────────────
+    // BSC Mainnet PancakeSwap Router v2: 0x10ED43C718714eb63d5aA57B78B54704E256024E
     constructor(address _router) Ownable(msg.sender) {
         pancakeRouter = _router;
         lastMainDistributeTime = block.timestamp;
@@ -152,23 +157,21 @@ contract DiamondVault is Ownable, ReentrancyGuard {
     receive() external payable {}
 
     // ═══════════════════════════════════════════════════════════
-    //  接收分红 BNB（由 DiamondToken 自动调用）
+    //  接收分红 BNB
     // ═══════════════════════════════════════════════════════════
 
     function receiveMainReward() external payable {
         mainRewardPool += msg.value;
         emit MainRewardReceived(msg.value);
-        if (block.timestamp >= lastMainDistributeTime + MAIN_REWARD_INTERVAL) {
+        if (block.timestamp >= lastMainDistributeTime + MAIN_REWARD_INTERVAL)
             _distributeMain();
-        }
     }
 
     function receiveDiamondReward() external payable {
         diaRewardPool += msg.value;
         emit DiaRewardReceived(msg.value);
-        if (block.timestamp >= lastDiaDistributeTime + DIAMOND_REWARD_INTERVAL) {
+        if (block.timestamp >= lastDiaDistributeTime + DIAMOND_REWARD_INTERVAL)
             _distributeDiamond();
-        }
     }
 
     function receiveBuybackBurn() external payable {
@@ -180,35 +183,28 @@ contract DiamondVault is Ownable, ReentrancyGuard {
     //  用户操作
     // ═══════════════════════════════════════════════════════════
 
-    /// @notice 注册 / 买入后追加持仓
-    function register() external nonReentrant {
-        _registerOrAdd(msg.sender);
-    }
+    function register() external nonReentrant { _registerOrAdd(msg.sender); }
 
     function registerFor(address account) external nonReentrant {
         require(account != address(0), "Zero address");
         _registerOrAdd(account);
     }
 
+    function syncBalance() external nonReentrant { _registerOrAdd(msg.sender); }
+
     function _registerOrAdd(address account) internal {
         require(token != address(0), "Token not set");
         require(!blacklisted[account], "Blacklisted");
-
         uint256 onChainBalance = IERC20(token).balanceOf(account);
         require(onChainBalance > 0, "No tokens held");
-
         UserInfo storage u = users[account];
         uint256 recorded = u.totalBalance;
-
         if (onChainBalance < recorded) {
-            // 余额减少 = 卖出，惩罚并以当前余额重新开始
             _penalizeUser(account);
             _addPosition(account, onChainBalance);
             return;
         }
-
         if (onChainBalance > recorded) {
-            // 余额增加 = 新买入，追加一批持仓
             uint256 newAmount = onChainBalance - recorded;
             _updateUserRewards(account);
             _addPosition(account, newAmount);
@@ -216,22 +212,16 @@ contract DiamondVault is Ownable, ReentrancyGuard {
             emit PositionAdded(account, newAmount, u.positions.length - 1);
             return;
         }
-
-        // 余额不变，忽略
     }
 
-    /// @notice 添加一批持仓记录
     function _addPosition(address account, uint256 amount) internal {
         UserInfo storage u = users[account];
         require(u.positions.length < MAX_POSITIONS, "Too many positions");
-
         bool isFirst = u.totalBalance == 0 && u.positions.length == 0;
-
         u.positions.push(Position({ amount: amount, startTime: block.timestamp }));
         u.mainRewardDebt = mainAccPerPower;
         u.diaRewardDebt  = diaAccPerPower;
         if (u.level == 0) u.level = 1;
-
         if (isFirst) {
             u.totalBalance = amount;
             if (!userRegistered[account]) {
@@ -243,38 +233,23 @@ contract DiamondVault is Ownable, ReentrancyGuard {
         }
     }
 
-    /// @notice 同步余额（等同于 register，对外提供友好名称）
-    function syncBalance() external nonReentrant {
-        _registerOrAdd(msg.sender);
-    }
-
-    /// @notice 领取分红
     function claim() external nonReentrant {
         require(token != address(0), "Token not set");
         UserInfo storage u = users[msg.sender];
         require(u.totalBalance > 0, "Not registered");
-
         uint256 onChainBalance = IERC20(token).balanceOf(msg.sender);
-        if (onChainBalance < u.totalBalance) {
-            _penalizeUser(msg.sender);
-            return;
-        }
-
+        if (onChainBalance < u.totalBalance) { _penalizeUser(msg.sender); return; }
         _updateUserRewards(msg.sender);
-
         uint256 mainAmt = u.pendingMainReward;
         uint256 diaAmt  = u.pendingDiaReward;
         uint256 total   = mainAmt + diaAmt;
-
         require(total > 0, "Nothing to claim");
         require(address(this).balance >= total, "Insufficient BNB");
-
         u.pendingMainReward  = 0;
         u.pendingDiaReward   = 0;
         u.totalClaimed      += total;
         totalMainDistributed += mainAmt;
         totalDiaDistributed  += diaAmt;
-
         emit Claimed(msg.sender, mainAmt, diaAmt);
         (bool sent,) = msg.sender.call{value: total}("");
         require(sent, "Transfer failed");
@@ -306,7 +281,6 @@ contract DiamondVault is Ownable, ReentrancyGuard {
         emit DiaRewardDistributed(amount, diamondPower);
     }
 
-    /// @notice 任何人可触发分红结算
     function triggerDistribution() external nonReentrant {
         if (block.timestamp >= lastMainDistributeTime + MAIN_REWARD_INTERVAL && mainRewardPool > 0)
             _distributeMain();
@@ -315,7 +289,7 @@ contract DiamondVault is Ownable, ReentrancyGuard {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  奖励结算
+    //  奖励结算 / 惩罚 / 算力
     // ═══════════════════════════════════════════════════════════
 
     function _updateUserRewards(address account) internal {
@@ -332,37 +306,23 @@ contract DiamondVault is Ownable, ReentrancyGuard {
         u.diaRewardDebt = diaAccPerPower;
     }
 
-    // ═══════════════════════════════════════════════════════════
-    //  惩罚
-    // ═══════════════════════════════════════════════════════════
-
     function _penalizeUser(address account) internal {
         UserInfo storage u = users[account];
         _updateUserRewards(account);
-
         uint8 oldLevel = u.level;
         if (u.level > 1) u.level--;
-
         uint256 forfeitedMain = u.pendingMainReward;
         uint256 forfeitedDia  = u.pendingDiaReward;
         u.pendingMainReward = 0;
         u.pendingDiaReward  = 0;
         mainRewardPool += forfeitedMain;
         diaRewardPool  += forfeitedDia;
-
-        // 清空所有持仓
         delete u.positions;
         u.totalBalance = 0;
         if (activeUserCount > 0) activeUserCount--;
-
         emit UserPenalized(account, oldLevel, u.level, forfeitedMain, forfeitedDia);
     }
 
-    // ═══════════════════════════════════════════════════════════
-    //  算力计算
-    // ═══════════════════════════════════════════════════════════
-
-    /// @notice 最早一批持仓的持有小时数 → 决定等级
     function _oldestHeldHours(address account) internal view returns (uint256) {
         UserInfo storage u = users[account];
         if (u.positions.length == 0) return 0;
@@ -373,7 +333,6 @@ contract DiamondVault is Ownable, ReentrancyGuard {
         return (block.timestamp - oldest) / 1 hours;
     }
 
-    /// @notice 根据最早持仓时长计算等级（1~10）
     function _oldestPositionLevel(address account) internal view returns (uint8) {
         uint256 h = _oldestHeldHours(account);
         for (uint8 i = 9; i >= 1; i--) {
@@ -382,28 +341,21 @@ contract DiamondVault is Ownable, ReentrancyGuard {
         return 1;
     }
 
-    /// @notice 用户总算力 = Σ每批算力
-    /// 每批算力 = min(批量, 剩余可用封顶) × 等级倍率 × 该批持有小时数
     function _userPower(address account) internal view returns (uint256) {
         UserInfo storage u = users[account];
         if (u.positions.length == 0) return 0;
-
         uint8   lv         = _oldestPositionLevel(account);
         uint256 multiplier = LEVEL_MULTIPLIER[lv - 1];
         uint256 capUsed    = 0;
         uint256 totalPower = 0;
-
         for (uint256 i = 0; i < u.positions.length; i++) {
             Position storage p = u.positions[i];
             if (capUsed >= MAX_WEIGHT_BALANCE) break;
-
             uint256 remaining = MAX_WEIGHT_BALANCE - capUsed;
             uint256 effective = p.amount > remaining ? remaining : p.amount;
             capUsed += effective;
-
             uint256 heldHours = (block.timestamp - p.startTime) / 1 hours;
-            if (heldHours == 0) continue; // 不足1小时无算力
-
+            if (heldHours == 0) continue;
             totalPower += (effective * multiplier * heldHours) / 10;
         }
         return totalPower;
@@ -429,7 +381,7 @@ contract DiamondVault is Ownable, ReentrancyGuard {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  回购销毁
+    //  回购销毁 / 批量操作
     // ═══════════════════════════════════════════════════════════
 
     function _doBuybackBurn(uint256 bnbAmount) internal {
@@ -444,10 +396,6 @@ contract DiamondVault is Ownable, ReentrancyGuard {
             emit BuybackBurn(bnbAmount);
         } catch {}
     }
-
-    // ═══════════════════════════════════════════════════════════
-    //  批量操作
-    // ═══════════════════════════════════════════════════════════
 
     function batchPenalizeSellers(address[] calldata accounts) external nonReentrant {
         require(token != address(0), "Token not set");
@@ -497,22 +445,22 @@ contract DiamondVault is Ownable, ReentrancyGuard {
     function getUserPositions(address account) external view returns (
         uint256[] memory amounts,
         uint256[] memory startTimes,
-        uint256[] memory heldHours
+        uint256[] memory heldHoursArr
     ) {
         UserInfo storage u = users[account];
         uint256 len = u.positions.length;
-        amounts    = new uint256[](len);
-        startTimes = new uint256[](len);
-        heldHours  = new uint256[](len);
+        amounts      = new uint256[](len);
+        startTimes   = new uint256[](len);
+        heldHoursArr = new uint256[](len);
         for (uint256 i = 0; i < len; i++) {
-            amounts[i]    = u.positions[i].amount;
-            startTimes[i] = u.positions[i].startTime;
-            heldHours[i]  = (block.timestamp - u.positions[i].startTime) / 1 hours;
+            amounts[i]      = u.positions[i].amount;
+            startTimes[i]   = u.positions[i].startTime;
+            heldHoursArr[i] = (block.timestamp - u.positions[i].startTime) / 1 hours;
         }
     }
 
     function getLevelInfo(address account) external view returns (
-        uint8   currentLevel_,
+        uint8  currentLevel_,
         string memory levelName,
         uint256 multiplier_,
         uint256 heldHours_,
@@ -528,7 +476,7 @@ contract DiamondVault is Ownable, ReentrancyGuard {
             unicode"Lv7 \u9493\u77f3\u65b0\u79c0", unicode"Lv8 \u9493\u77f3\u624b",
             unicode"Lv9 \u9493\u77f3\u957f\u8001", unicode"Lv10 \u9493\u77f3\u738b\u8005"
         ];
-        levelName     = names[currentLevel_ - 1];
+        levelName      = names[currentLevel_ - 1];
         nextLevelHours = currentLevel_ < 10 ? LEVEL_HOURS[currentLevel_] : 0;
     }
 
@@ -557,7 +505,7 @@ contract DiamondVault is Ownable, ReentrancyGuard {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Owner
+    //  Owner 管理函数
     // ═══════════════════════════════════════════════════════════
 
     function setToken(address _token) external onlyOwner {
@@ -580,6 +528,7 @@ contract DiamondVault is Ownable, ReentrancyGuard {
         _doBuybackBurn(msg.value);
     }
 
+    /// @notice 紧急提取 BNB（防资金永久锁死）
     function emergencyWithdraw(uint256 amount) external onlyOwner {
         (bool sent,) = owner().call{value: amount}("");
         require(sent, "Transfer failed");
