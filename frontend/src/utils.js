@@ -38,7 +38,7 @@ export const fmt = {
   addr: (a) => a ? `${a.slice(0,6)}…${a.slice(-4)}` : '—',
 }
 
-// ── 等级数据 ──────────────────────────────────────────────────
+// ── 等级数据（前端展示用）────────────────────────────────────
 export const LEVEL_DATA = [
   { lv: 1,  name: 'Lv1 蚂蚁',   minHours: 0,   mult: 1.0 },
   { lv: 2,  name: 'Lv2 工蚁',   minHours: 24,  mult: 1.1 },
@@ -52,6 +52,5 @@ export const LEVEL_DATA = [
   { lv: 10, name: 'Lv10 蚁后',  minHours: 408, mult: 2.5 },
 ]
 
-// ── 等级升级所需最低持有小时数（下标 0 = Lv1, 下标 9 = Lv10）
-// UserPanel LvProgress 进度条使用
+// ── 等级升级所需最低持有小时（下标 0=Lv1 … 下标 9=Lv10）
 export const LEVEL_THRESHOLDS = [0, 24, 60, 96, 132, 168, 228, 288, 348, 408]
