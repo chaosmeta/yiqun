@@ -1,48 +1,64 @@
 // src/utils.js
-import { formatEther } from 'viem'
+import { formatUnits } from 'viem'
 
+// ── 格式化工具 ────────────────────────────────────────────────
 export const fmt = {
+  // BNB: 18位精度，保留4位小数
   bnb: (wei) => {
-    if (wei === undefined || wei === null) return '0.0000'
-    return parseFloat(formatEther(BigInt(wei))).toFixed(4)
+    if (wei == null) return '—'
+    const n = parseFloat(formatUnits(BigInt(wei.toString()), 18))
+    return n.toLocaleString('en', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
   },
+
+  // 代币: 18位精度，保留0位（整数显示，带千分位）
   token: (wei) => {
-    if (!wei) return '0'
-    const n = parseFloat(formatEther(BigInt(wei)))
-    if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M'
-    if (n >= 1_000)     return (n / 1_000).toFixed(2) + 'K'
+    if (wei == null) return '—'
+    const n = parseFloat(formatUnits(BigInt(wei.toString()), 18))
+    return n.toLocaleString('en', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+  },
+
+  // 算力（纯数字，保留2位）
+  power: (raw) => {
+    if (raw == null) return '—'
+    const n = parseFloat(formatUnits(BigInt(raw.toString()), 18))
+    if (n >= 1e9)  return (n / 1e9).toFixed(2) + ' G'
+    if (n >= 1e6)  return (n / 1e6).toFixed(2) + ' M'
+    if (n >= 1e3)  return (n / 1e3).toFixed(2) + ' K'
     return n.toFixed(2)
   },
-  power: (wei) => {
-    if (!wei) return '0'
-    const n = parseFloat(formatEther(BigInt(wei)))
-    if (n >= 1e12) return (n / 1e12).toFixed(2) + 'T'
-    if (n >= 1e9)  return (n / 1e9).toFixed(2) + 'B'
-    if (n >= 1e6)  return (n / 1e6).toFixed(2) + 'M'
-    if (n >= 1e3)  return (n / 1e3).toFixed(2) + 'K'
-    return n.toFixed(2)
+
+  // 倒计时（秒 → hh:mm:ss）
+  countdown: (secs) => {
+    if (secs == null) return '—'
+    const s = Math.max(0, Number(secs))
+    const h = Math.floor(s / 3600)
+    const m = Math.floor((s % 3600) / 60)
+    const sec = s % 60
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
   },
-  countdown: (seconds) => {
-    if (seconds <= 0) return '即将分红!'
-    const h = Math.floor(seconds / 3600)
-    const m = Math.floor((seconds % 3600) / 60)
-    const s = seconds % 60
-    return `${h}h ${m}m ${s}s`
+
+  // 持有时间（小时 → 天+小时）
+  heldTime: (hours) => {
+    if (hours == null) return '—'
+    const h = Number(hours)
+    if (h < 24) return `${h} 小时`
+    return `${Math.floor(h/24)} 天 ${h % 24} 小时`
   },
-  addr: (addr) => addr ? `${addr.slice(0,6)}…${addr.slice(-4)}` : '',
+
+  // 地址缩写
+  addr: (a) => a ? `${a.slice(0,6)}…${a.slice(-4)}` : '—',
 }
 
+// ── 等级数据（前端展示用）────────────────────────────────────
 export const LEVEL_DATA = [
-  { lv: 1,  name: '散户',     hours: '0~24h',    mult: 1.0 },
-  { lv: 2,  name: '铁杆',     hours: '24~60h',   mult: 1.1 },
-  { lv: 3,  name: '坚守',     hours: '60~96h',   mult: 1.2 },
-  { lv: 4,  name: '信仰',     hours: '96~132h',  mult: 1.3 },
-  { lv: 5,  name: '长持',     hours: '132~168h', mult: 1.4 },
-  { lv: 6,  name: '恒心',     hours: '168~228h', mult: 1.6 },
-  { lv: 7,  name: '钻石新秀', hours: '228~288h', mult: 1.8 },
-  { lv: 8,  name: '钻石手',   hours: '288~348h', mult: 2.0 },
-  { lv: 9,  name: '钻石长老', hours: '348~408h', mult: 2.2 },
-  { lv: 10, name: '钻石王者', hours: '408h+',    mult: 2.5 },
+  { lv: 1,  name: 'Lv1 蚂蚁',   minHours: 0,   mult: 1.0 },
+  { lv: 2,  name: 'Lv2 工蚁',   minHours: 24,  mult: 1.1 },
+  { lv: 3,  name: 'Lv3 兵蚁',   minHours: 60,  mult: 1.2 },
+  { lv: 4,  name: 'Lv4 侦察蚁', minHours: 96,  mult: 1.3 },
+  { lv: 5,  name: 'Lv5 卫兵蚁', minHours: 132, mult: 1.4 },
+  { lv: 6,  name: 'Lv6 队长蚁', minHours: 168, mult: 1.6 },
+  { lv: 7,  name: 'Lv7 精英蚁', minHours: 228, mult: 1.8 },
+  { lv: 8,  name: 'Lv8 老兵蚁', minHours: 288, mult: 2.0 },
+  { lv: 9,  name: 'Lv9 长老蚁', minHours: 348, mult: 2.2 },
+  { lv: 10, name: 'Lv10 蚁后',  minHours: 408, mult: 2.5 },
 ]
-
-export const LEVEL_THRESHOLDS = [0, 24, 60, 96, 132, 168, 228, 288, 348, 408]

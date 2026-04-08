@@ -3,20 +3,17 @@ import { getDefaultConfig } from '@rainbow-me/rainbowkit'
 import { bsc } from 'viem/chains'
 
 export const wagmiConfig = getDefaultConfig({
-  appName: 'Diamond Protocol',
+  appName: '蚁群协议',
   // 从 https://cloud.walletconnect.com 免费获取
   projectId: 'YOUR_WALLETCONNECT_PROJECT_ID',
   chains: [bsc],
   ssr: false,
 })
 
-// ── 合约地址（部署后填入）─────────────────────────────────
+// ── 合约地址 ─────────────────────────────────────────────────
 export const CONTRACT_ADDRESSES = {
-  TOKEN:  '', // 部署后填入 DiamondToken 合约地址
-  VAULT:  '', // 部署后填入 DiamondVault 合约地址
-  PAIR:   '', // 部署后填入 PancakeSwap LP Pair 地址（Token合约的 pancakePair()）
-  // BSC Mainnet PancakeSwap Router v2
+  TOKEN:  '',  // 发射平台部署后填入代币合约地址
+  VAULT:  '0x1253963AEAceA1362Cf50a7a7FBE677528e5FD9b', // AntVault 已部署
   ROUTER: '0x10ED43C718714eb63d5aA57B78B54704E256024E',
-  // WBNB on BSC Mainnet
   WBNB:   '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
 }
