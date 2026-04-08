@@ -1,29 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-// ═══════════════════════════════════════════════════════════════
-//  DiamondVault v4 — 蚁群算力分红合约（分批持仓版）
-//  BSC Mainnet
-//
-//  算力公式：总算力 = Σ(每批持仓算力)
-//  每批算力 = min(该批数量, 剩余可用封顶额度) × 等级倍率 × 该批持有小时数
-//
-//  等级系统（10级，按最早一批持有时间升级）：
-//  Lv1  散户      0~24h    × 1.0
-//  Lv2  铁杆     24~60h    × 1.1
-//  Lv3  坚守     60~96h    × 1.2
-//  Lv4  信仰     96~132h   × 1.3
-//  Lv5  长持    132~168h   × 1.4
-//  Lv6  恒心    168~228h   × 1.6
-//  Lv7  钻石新秀 228~288h  × 1.8
-//  Lv8  钻石手  288~348h   × 2.0
-//  Lv9  钻石长老 348~408h  × 2.2
-//  Lv10 钻石王者  408h+    × 2.5
-//
-//  卖出/转出惩罚：所有持仓清零，等级降1级
-//  分红周期：主分红 2小时，钻石王者额外分红 48小时
-// ═══════════════════════════════════════════════════════════════
-
 abstract contract Context {
     function _msgSender() internal view virtual returns (address) { return msg.sender; }
 }
@@ -31,22 +8,17 @@ abstract contract Context {
 abstract contract Ownable is Context {
     address private _owner;
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
-
     constructor(address initialOwner) {
         _owner = initialOwner;
         emit OwnershipTransferred(address(0), initialOwner);
     }
-
     modifier onlyOwner() { require(_owner == _msgSender(), "Not owner"); _; }
-
     function owner() public view returns (address) { return _owner; }
-
     function transferOwnership(address newOwner) external onlyOwner {
         require(newOwner != address(0), "Zero address");
         emit OwnershipTransferred(_owner, newOwner);
         _owner = newOwner;
     }
-
     function renounceOwnership() external onlyOwner {
         emit OwnershipTransferred(_owner, address(0));
         _owner = address(0);
@@ -54,21 +26,20 @@ abstract contract Ownable is Context {
 }
 
 abstract contract ReentrancyGuard {
-    uint256 private constant NOT_ENTERED = 1;
-    uint256 private constant ENTERED = 2;
+    uint256 private constant _NOT_ENTERED = 1;
+    uint256 private constant _ENTERED = 2;
     uint256 private _status;
-    constructor() { _status = NOT_ENTERED; }
+    constructor() { _status = _NOT_ENTERED; }
     modifier nonReentrant() {
-        require(_status != ENTERED, "Reentrant call");
-        _status = ENTERED;
+        require(_status != _ENTERED, "Reentrant call");
+        _status = _ENTERED;
         _;
-        _status = NOT_ENTERED;
+        _status = _NOT_ENTERED;
     }
 }
 
 interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
-    function transfer(address to, uint256 amount) external returns (bool);
 }
 
 interface IPancakeRouter02 {
@@ -83,29 +54,32 @@ interface IPancakeRouter02 {
 
 contract DiamondVault is Ownable, ReentrancyGuard {
 
-    // ─── 常量 ─────────────────────────────────────────────────
+    // ─── 全局常量 ──────────────────────────────────────────────
     uint256 public constant PRECISION               = 1e18;
     uint256 public constant MAX_WEIGHT_BALANCE      = 5_000_000 * 1e18;
     uint256 public constant MAIN_REWARD_INTERVAL    = 2 hours;
     uint256 public constant DIAMOND_REWARD_INTERVAL = 48 hours;
     uint256 public constant MAX_POSITIONS           = 50;
     address public constant DEAD                    = 0x000000000000000000000000000000000000dEaD;
+    address public constant PANCAKE_ROUTER          = 0x10ED43C718714eb63d5aA57B78B54704E256024E;
 
-    // BSC Mainnet PancakeSwap Router v2（写死，无需构造函数传入）
-    address public constant PANCAKE_ROUTER = 0x10ED43C718714eb63d5aA57B78B54704E256024E;
+    // ─── 等级数据（pure函数，不占存储，不写链上）────────────────
+    function _levelHours(uint8 i) internal pure returns (uint256) {
+        uint256[10] memory h = [uint256(0), 24, 60, 96, 132, 168, 228, 288, 348, 408];
+        return h[i];
+    }
+    function _levelMultiplier(uint8 i) internal pure returns (uint256) {
+        uint256[10] memory m = [uint256(10), 11, 12, 13, 14, 16, 18, 20, 22, 25];
+        return m[i];
+    }
 
-    uint256[10] public LEVEL_HOURS      = [0, 24, 60, 96, 132, 168, 228, 288, 348, 408];
-    uint256[10] public LEVEL_MULTIPLIER = [10, 11, 12, 13, 14, 16, 18, 20, 22, 25];
-
-    // ─── 地址 ─────────────────────────────────────────────────
+    // ─── 状态变量 ──────────────────────────────────────────────
     address public token;
 
-    // ─── 分批持仓结构 ─────────────────────────────────────────
     struct Position {
         uint256 amount;
         uint256 startTime;
     }
-
     struct UserInfo {
         Position[] positions;
         uint8   level;
@@ -122,7 +96,6 @@ contract DiamondVault is Ownable, ReentrancyGuard {
     mapping(address => bool) public userRegistered;
     uint256 public activeUserCount;
 
-    // ─── 分红池 ───────────────────────────────────────────────
     uint256 public lastMainDistributeTime;
     uint256 public lastDiaDistributeTime;
     uint256 public mainRewardPool;
@@ -135,7 +108,7 @@ contract DiamondVault is Ownable, ReentrancyGuard {
 
     mapping(address => bool) public blacklisted;
 
-    // ─── Events ───────────────────────────────────────────────
+    // ─── Events ────────────────────────────────────────────────
     event Registered(address indexed user, uint256 amount, uint256 positionIndex);
     event PositionAdded(address indexed user, uint256 amount, uint256 positionIndex);
     event UserPenalized(address indexed user, uint8 oldLevel, uint8 newLevel, uint256 forfeitedMain, uint256 forfeitedDia);
@@ -147,7 +120,7 @@ contract DiamondVault is Ownable, ReentrancyGuard {
     event DiaRewardReceived(uint256 amount);
     event BuybackReceived(uint256 amount);
 
-    // ★ 构造函数无参数，直接部署即可
+    // ★ 无参数构造函数，只写两个时间戳，绝对不会 estimateGas 失败
     constructor() Ownable(msg.sender) {
         lastMainDistributeTime = block.timestamp;
         lastDiaDistributeTime  = block.timestamp;
@@ -209,7 +182,6 @@ contract DiamondVault is Ownable, ReentrancyGuard {
             _addPosition(account, newAmount);
             u.totalBalance = onChainBalance;
             emit PositionAdded(account, newAmount, u.positions.length - 1);
-            return;
         }
     }
 
@@ -335,7 +307,7 @@ contract DiamondVault is Ownable, ReentrancyGuard {
     function _oldestPositionLevel(address account) internal view returns (uint8) {
         uint256 h = _oldestHeldHours(account);
         for (uint8 i = 9; i >= 1; i--) {
-            if (h >= LEVEL_HOURS[i]) return i + 1;
+            if (h >= _levelHours(i)) return i + 1;
         }
         return 1;
     }
@@ -344,20 +316,19 @@ contract DiamondVault is Ownable, ReentrancyGuard {
         UserInfo storage u = users[account];
         if (u.positions.length == 0) return 0;
         uint8   lv         = _oldestPositionLevel(account);
-        uint256 multiplier = LEVEL_MULTIPLIER[lv - 1];
+        uint256 multiplier = _levelMultiplier(lv - 1);
         uint256 capUsed    = 0;
-        uint256 totalPower = 0;
+        uint256 power      = 0;
         for (uint256 i = 0; i < u.positions.length; i++) {
-            Position storage p = u.positions[i];
             if (capUsed >= MAX_WEIGHT_BALANCE) break;
             uint256 remaining = MAX_WEIGHT_BALANCE - capUsed;
-            uint256 effective = p.amount > remaining ? remaining : p.amount;
+            uint256 effective = u.positions[i].amount > remaining ? remaining : u.positions[i].amount;
             capUsed += effective;
-            uint256 heldHours = (block.timestamp - p.startTime) / 1 hours;
+            uint256 heldHours = (block.timestamp - u.positions[i].startTime) / 1 hours;
             if (heldHours == 0) continue;
-            totalPower += (effective * multiplier * heldHours) / 10;
+            power += (effective * multiplier * heldHours) / 10;
         }
-        return totalPower;
+        return power;
     }
 
     function _calcTotalPower() internal view returns (uint256) {
@@ -416,6 +387,14 @@ contract DiamondVault is Ownable, ReentrancyGuard {
     //  View Functions
     // ═══════════════════════════════════════════════════════════
 
+    function getLevelHours() external pure returns (uint256[10] memory) {
+        return [uint256(0), 24, 60, 96, 132, 168, 228, 288, 348, 408];
+    }
+
+    function getLevelMultipliers() external pure returns (uint256[10] memory) {
+        return [uint256(10), 11, 12, 13, 14, 16, 18, 20, 22, 25];
+    }
+
     function getUserInfo(address account) external view returns (
         uint256 totalBalance_,
         uint8   level,
@@ -431,11 +410,10 @@ contract DiamondVault is Ownable, ReentrancyGuard {
         level           = _oldestPositionLevel(account);
         oldestHeldHours = _oldestHeldHours(account);
         power           = _userPower(account);
-        uint256 pw      = power;
-        uint256 mainInc = pw > 0 ? (pw * (mainAccPerPower - u.mainRewardDebt)) / PRECISION : 0;
+        uint256 mainInc = power > 0 ? (power * (mainAccPerPower - u.mainRewardDebt)) / PRECISION : 0;
         pendingMain     = u.pendingMainReward + mainInc;
-        uint256 diaInc  = (pw > 0 && _oldestPositionLevel(account) == 10)
-                          ? (pw * (diaAccPerPower - u.diaRewardDebt)) / PRECISION : 0;
+        uint256 diaInc  = (power > 0 && _oldestPositionLevel(account) == 10)
+                          ? (power * (diaAccPerPower - u.diaRewardDebt)) / PRECISION : 0;
         pendingDia      = u.pendingDiaReward + diaInc;
         totalClaimed_   = u.totalClaimed;
         positionCount   = u.positions.length;
@@ -463,20 +441,18 @@ contract DiamondVault is Ownable, ReentrancyGuard {
         string memory levelName,
         uint256 multiplier_,
         uint256 heldHours_,
-        uint256 nextLevelHours
+        uint256 nextLevelHours_
     ) {
         currentLevel_ = _oldestPositionLevel(account);
-        multiplier_   = LEVEL_MULTIPLIER[currentLevel_ - 1];
+        multiplier_   = _levelMultiplier(currentLevel_ - 1);
         heldHours_    = _oldestHeldHours(account);
         string[10] memory names = [
-            unicode"Lv1 \u6563\u6237",   unicode"Lv2 \u9435\u6746",
-            unicode"Lv3 \u575a\u5b88",   unicode"Lv4 \u4fe1\u4ef0",
-            unicode"Lv5 \u957f\u6301",   unicode"Lv6 \u6052\u5fc3",
-            unicode"Lv7 \u9493\u77f3\u65b0\u79c0", unicode"Lv8 \u9493\u77f3\u624b",
-            unicode"Lv9 \u9493\u77f3\u957f\u8001", unicode"Lv10 \u9493\u77f3\u738b\u8005"
+            "Lv1 Ant",     "Lv2 Worker",  "Lv3 Soldier",
+            "Lv4 Scout",   "Lv5 Guard",   "Lv6 Captain",
+            "Lv7 Elite",   "Lv8 Veteran", "Lv9 Elder",   "Lv10 Queen"
         ];
         levelName      = names[currentLevel_ - 1];
-        nextLevelHours = currentLevel_ < 10 ? LEVEL_HOURS[currentLevel_] : 0;
+        nextLevelHours_ = currentLevel_ < 10 ? _levelHours(currentLevel_) : 0;
     }
 
     function getGlobalStats() external view returns (
