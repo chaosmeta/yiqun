@@ -4,8 +4,7 @@ import { bsc } from 'viem/chains'
 
 export const wagmiConfig = getDefaultConfig({
   appName: '蚁群协议',
-  // 从 https://cloud.walletconnect.com 免费获取
-  projectId: 'YOUR_WALLETCONNECT_PROJECT_ID',
+  projectId: 'ba3f0ea97d5183fa5b2a92e2e51fd1f7',
   chains: [bsc],
   ssr: false,
 })
