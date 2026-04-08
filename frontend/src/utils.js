@@ -3,21 +3,16 @@ import { formatUnits } from 'viem'
 
 // ── 格式化工具 ────────────────────────────────────────────────
 export const fmt = {
-  // BNB: 18位精度，保留4位小数
   bnb: (wei) => {
     if (wei == null) return '—'
     const n = parseFloat(formatUnits(BigInt(wei.toString()), 18))
     return n.toLocaleString('en', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
   },
-
-  // 代币: 18位精度，保留0位（整数显示，带千分位）
   token: (wei) => {
     if (wei == null) return '—'
     const n = parseFloat(formatUnits(BigInt(wei.toString()), 18))
     return n.toLocaleString('en', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
   },
-
-  // 算力（纯数字，保留2位）
   power: (raw) => {
     if (raw == null) return '—'
     const n = parseFloat(formatUnits(BigInt(raw.toString()), 18))
@@ -26,8 +21,6 @@ export const fmt = {
     if (n >= 1e3)  return (n / 1e3).toFixed(2) + ' K'
     return n.toFixed(2)
   },
-
-  // 倒计时（秒 → hh:mm:ss）
   countdown: (secs) => {
     if (secs == null) return '—'
     const s = Math.max(0, Number(secs))
@@ -36,20 +29,16 @@ export const fmt = {
     const sec = s % 60
     return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
   },
-
-  // 持有时间（小时 → 天+小时）
   heldTime: (hours) => {
     if (hours == null) return '—'
     const h = Number(hours)
     if (h < 24) return `${h} 小时`
     return `${Math.floor(h/24)} 天 ${h % 24} 小时`
   },
-
-  // 地址缩写
   addr: (a) => a ? `${a.slice(0,6)}…${a.slice(-4)}` : '—',
 }
 
-// ── 等级数据（前端展示用）────────────────────────────────────
+// ── 等级数据 ──────────────────────────────────────────────────
 export const LEVEL_DATA = [
   { lv: 1,  name: 'Lv1 蚂蚁',   minHours: 0,   mult: 1.0 },
   { lv: 2,  name: 'Lv2 工蚁',   minHours: 24,  mult: 1.1 },
@@ -62,3 +51,7 @@ export const LEVEL_DATA = [
   { lv: 9,  name: 'Lv9 长老蚁', minHours: 348, mult: 2.2 },
   { lv: 10, name: 'Lv10 蚁后',  minHours: 408, mult: 2.5 },
 ]
+
+// ── 等级升级所需最低持有小时数（下标 0 = Lv1, 下标 9 = Lv10）
+// UserPanel LvProgress 进度条使用
+export const LEVEL_THRESHOLDS = [0, 24, 60, 96, 132, 168, 228, 288, 348, 408]
