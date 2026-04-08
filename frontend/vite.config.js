@@ -6,4 +6,6 @@ export default defineConfig({
   define: {
     global: 'globalThis',
   },
+  // frontend/public 是一个文件（非目录），禁用 publicDir 避免 Vite 报 ENOTDIR
+  publicDir: false,
 })
