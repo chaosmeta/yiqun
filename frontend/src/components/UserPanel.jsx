@@ -102,41 +102,44 @@ export function UserPanel() {
   const lvName = levelInfo?.[1] ?? '—'
   const mult   = levelInfo ? Number(levelInfo[2]) : 10
 
-  // getGlobalStats: [totalPower, mainPool, diaPool, ..., contractBNB(9)]
+  // getGlobalStats: [totalPower(0), mainPool(1), diaPool(2), ..., contractBNB(9)]
   const totalPower  = globalStats?.[0] ?? 0n
-  const mainPool    = globalStats?.[1] ?? 0n  // 主分红池实时余额
-  const diaPool     = globalStats?.[2] ?? 0n  // 王者池实时余额
-  const contractBNB = globalStats?.[9] ?? 0n  // 合约总余额
+  const mainPool    = globalStats?.[1] ?? 0n
+  const diaPool     = globalStats?.[2] ?? 0n
+  const contractBNB = globalStats?.[9] ?? 0n
 
   const isLv10 = lv === 10
 
-  // ── 核心算法：用实时合约余额 × 算力占比 ──────────────────────
-  // 每次都基于当前合约里实际有多少钱来算，不依赖链上累计的 pending
-  // 这样显示的数字始终和合约实际余额挂钩，领多少就是多少
+  // ══════════════════════════════════════════════════════════════
+  //  核心显示算法：实时分红池余额 × 算力占比
+  //  = 合约里现在有多少钱，你能分到多少，显示多少就到手多少
+  //  彻底解决"显示N个BNB但领不到"的问题
+  // ══════════════════════════════════════════════════════════════
   const myShareRatio = (totalPower > 0n && power > 0n)
     ? Number(power) / Number(totalPower)
     : 0
 
-  // 主分红可领 = 主分红池实时余额 × 算力占比
+  // 主分红可领 = 主分红池 × 占比
   const realtimeMain = mainPool > 0n
     ? BigInt(Math.floor(myShareRatio * Number(mainPool)))
     : 0n
 
-  // 王者池可领 = 王者池实时余额 × 算力占比（仅Lv10）
+  // 王者可领 = 王者池 × 占比（仅Lv10）
   const realtimeDia = (isLv10 && diaPool > 0n)
     ? BigInt(Math.floor(myShareRatio * Number(diaPool)))
     : 0n
 
   const realtimeTotal = realtimeMain + realtimeDia
 
-  // 安全上限：不超过合约总余额
-  const displayAmt  = realtimeTotal > contractBNB ? contractBNB : realtimeTotal
+  // 最终显示：不超过合约实际余额
   const displayMain = realtimeMain > contractBNB ? contractBNB : realtimeMain
-  const displayDia  = realtimeDia > (contractBNB - displayMain) ? (contractBNB - displayMain) : realtimeDia
+  const safeLeft    = contractBNB > displayMain ? contractBNB - displayMain : 0n
+  const displayDia  = realtimeDia > safeLeft ? safeLeft : realtimeDia
+  const displayAmt  = displayMain + displayDia
 
-  const sharePct    = myShareRatio > 0 ? (myShareRatio * 100).toFixed(2) : '0.00'
-  const hasPool     = mainPool > 0n || diaPool > 0n
-  const canClaim    = contractBNB > 0n && displayAmt > 0n
+  const sharePct = myShareRatio > 0 ? (myShareRatio * 100).toFixed(2) : '0.00'
+  const hasPool  = mainPool > 0n || diaPool > 0n
+  const canClaim = contractBNB > 0n && displayAmt > 0n
 
   return (
     <div className="panel user-panel">
@@ -178,13 +181,11 @@ export function UserPanel() {
         </div>
       </div>
 
-      {/* 分红池有钱但合约余额少时提示 */}
       {hasPool && contractBNB === 0n && (
         <div className="warn-box warn-red">
           ⚠️ 合约暂无可用余额，领取暂时不可用
         </div>
       )}
-
       {!hasPool && (
         <div className="warn-box warn-yellow">
           💡 分红池暂无资金，等待下次税收注入后可领取
