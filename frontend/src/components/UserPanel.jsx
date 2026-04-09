@@ -97,43 +97,37 @@ export function UserPanel() {
   const lv        = userInfo ? Number(userInfo[1]) : 1
   const heldHours = userInfo?.[2] ?? 0n
   const power     = userInfo?.[3] ?? 0n
-  const pendMain  = userInfo?.[4] ?? 0n
-  const pendDia   = userInfo?.[5] ?? 0n
+  const pendMain  = userInfo?.[4] ?? 0n  // 链上真实累计待领（主）
+  const pendDia   = userInfo?.[5] ?? 0n  // 链上真实累计待领（王者）
   const claimed   = userInfo?.[6] ?? 0n
 
   const lvName = levelInfo?.[1] ?? '—'
   const mult   = levelInfo ? Number(levelInfo[2]) : 10
 
-  // 全网算力 & 合约余额
   const totalPower  = globalStats?.[0] ?? 0n
-  const mainPool    = globalStats?.[1] ?? 0n   // 主分红池
-  const diaPool     = globalStats?.[2] ?? 0n   // 王者池
-  const contractBNB = globalStats?.[9] ?? 0n   // 合约实际余额
+  const contractBNB = globalStats?.[9] ?? 0n  // 合约实际余额
 
   const sharePct = totalPower > 0n && power > 0n
     ? ((Number(power) / Number(totalPower)) * 100).toFixed(2) : '0.00'
 
-  // ── 核心修复：按比例计算实际可领 ──────────────────────────────
-  // 原理：合约里的钱是有限的，用户实际能领的 = 分红池 × (我的算力占比)
-  // 这样不管待领数字叠加多高，显示的都是合约里实际属于你的那份
-  const myShare = totalPower > 0n && power > 0n
-    ? Number(power) / Number(totalPower) : 0
+  // ── 显示逻辑 ──────────────────────────────────────────────────
+  // 链上 pending 是合约记录的真实值，claim() 就是按这个发
+  // 如果 pending > contractBNB，实际到手 = contractBNB（合约没那么多钱）
+  // 所以：显示的数字 = min(pending, contractBNB)，和实际到手完全一致
+  const totalPend  = pendMain + pendDia
+  const displayAmt = totalPend > contractBNB ? contractBNB : totalPend
 
-  // 主分红：按算力占比 × 主分红池
-  const claimableMain = mainPool > 0n
-    ? BigInt(Math.floor(myShare * Number(mainPool))) : 0n
+  // 拆分显示：主分红和王者分红按比例缩减
+  const ratio = totalPend > 0n
+    ? Number(displayAmt) / Number(totalPend) : 0
+  const displayMain = BigInt(Math.floor(Number(pendMain) * ratio))
+  const displayDia  = BigInt(Math.floor(Number(pendDia)  * ratio))
 
-  // 王者池：Lv10才有，按算力占比 × 王者池
   const isLv10 = lv === 10
-  const claimableDia = (isLv10 && diaPool > 0n)
-    ? BigInt(Math.floor(myShare * Number(diaPool))) : 0n
-
-  // 总可领（不超过合约余额）
-  const claimableTotal = claimableMain + claimableDia
-  const safeClaimable  = claimableTotal > contractBNB ? contractBNB : claimableTotal
-
-  const hasVaultFunds = contractBNB > 0n && mainPool > 0n
-  const canClaim = hasVaultFunds && safeClaimable > 0n
+  const hasVaultFunds = contractBNB > 0n
+  const canClaim = hasVaultFunds && displayAmt > 0n
+  // 是否受限（链上有待领但合约钱不够）
+  const isLimited = totalPend > contractBNB && totalPend > 0n
 
   return (
     <div className="panel user-panel">
@@ -165,15 +159,22 @@ export function UserPanel() {
       <div className="reward-grid">
         <div className="reward-card main-card">
           <div className="rc-label">主分红可领</div>
-          <div className="rc-val blue">{fmt.bnb(claimableMain)}</div>
-          <div className="rc-unit">BNB · 按算力占比</div>
+          <div className="rc-val blue">{fmt.bnb(displayMain)}</div>
+          <div className="rc-unit">BNB · 每2小时</div>
         </div>
         <div className="reward-card dia-card">
           <div className="rc-label">🐜 蚁后可领</div>
-          <div className="rc-val diamond">{fmt.bnb(claimableDia)}</div>
+          <div className="rc-val diamond">{fmt.bnb(displayDia)}</div>
           <div className="rc-unit">{isLv10 ? 'BNB · Lv10专属' : '升至Lv10解锁'}</div>
         </div>
       </div>
+
+      {/* 受限提示：链上有更多待领，但合约暂时余额不足 */}
+      {isLimited && (
+        <div className="warn-box warn-yellow">
+          💡 你的累计待领 {fmt.bnb(totalPend)} BNB，当前受合约余额限制，实际可领 {fmt.bnb(displayAmt)} BNB，剩余待领将在下次分红补充后可领
+        </div>
+      )}
 
       {!hasVaultFunds && (
         <div className="warn-box warn-red">
@@ -186,12 +187,11 @@ export function UserPanel() {
           className="btn btn-gold"
           onClick={claim}
           disabled={!canClaim || isPending || isConfirming}
-          title={!hasVaultFunds ? '分红池暂无BNB' : ''}
         >
           {isPending || isConfirming
             ? '处理中…'
             : canClaim
-              ? `🏆 领取 ${fmt.bnb(safeClaimable)} BNB`
+              ? `🏆 领取 ${fmt.bnb(displayAmt)} BNB`
               : '暂无可领'}
         </button>
         <button className="btn btn-outline" onClick={syncBalance} disabled={isPending || isConfirming}>
