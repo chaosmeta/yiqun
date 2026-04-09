@@ -2,7 +2,7 @@
 import { useAccount } from 'wagmi'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useUserInfo, useVaultWrite, useGlobalStats } from '../hooks/useVault'
-import { fmt, LEVEL_DATA, LEVEL_THRESHOLDS } from '../utils'
+import { fmt, LEVEL_THRESHOLDS } from '../utils'
 import { useEffect, useState } from 'react'
 
 function LevelBadge({ lv }) {
@@ -97,37 +97,46 @@ export function UserPanel() {
   const lv        = userInfo ? Number(userInfo[1]) : 1
   const heldHours = userInfo?.[2] ?? 0n
   const power     = userInfo?.[3] ?? 0n
-  const pendMain  = userInfo?.[4] ?? 0n  // 链上真实累计待领（主）
-  const pendDia   = userInfo?.[5] ?? 0n  // 链上真实累计待领（王者）
   const claimed   = userInfo?.[6] ?? 0n
 
   const lvName = levelInfo?.[1] ?? '—'
   const mult   = levelInfo ? Number(levelInfo[2]) : 10
 
+  // getGlobalStats: [totalPower, mainPool, diaPool, ..., contractBNB(9)]
   const totalPower  = globalStats?.[0] ?? 0n
-  const contractBNB = globalStats?.[9] ?? 0n  // 合约实际余额
-
-  const sharePct = totalPower > 0n && power > 0n
-    ? ((Number(power) / Number(totalPower)) * 100).toFixed(2) : '0.00'
-
-  // ── 显示逻辑 ──────────────────────────────────────────────────
-  // 链上 pending 是合约记录的真实值，claim() 就是按这个发
-  // 如果 pending > contractBNB，实际到手 = contractBNB（合约没那么多钱）
-  // 所以：显示的数字 = min(pending, contractBNB)，和实际到手完全一致
-  const totalPend  = pendMain + pendDia
-  const displayAmt = totalPend > contractBNB ? contractBNB : totalPend
-
-  // 拆分显示：主分红和王者分红按比例缩减
-  const ratio = totalPend > 0n
-    ? Number(displayAmt) / Number(totalPend) : 0
-  const displayMain = BigInt(Math.floor(Number(pendMain) * ratio))
-  const displayDia  = BigInt(Math.floor(Number(pendDia)  * ratio))
+  const mainPool    = globalStats?.[1] ?? 0n  // 主分红池实时余额
+  const diaPool     = globalStats?.[2] ?? 0n  // 王者池实时余额
+  const contractBNB = globalStats?.[9] ?? 0n  // 合约总余额
 
   const isLv10 = lv === 10
-  const hasVaultFunds = contractBNB > 0n
-  const canClaim = hasVaultFunds && displayAmt > 0n
-  // 是否受限（链上有待领但合约钱不够）
-  const isLimited = totalPend > contractBNB && totalPend > 0n
+
+  // ── 核心算法：用实时合约余额 × 算力占比 ──────────────────────
+  // 每次都基于当前合约里实际有多少钱来算，不依赖链上累计的 pending
+  // 这样显示的数字始终和合约实际余额挂钩，领多少就是多少
+  const myShareRatio = (totalPower > 0n && power > 0n)
+    ? Number(power) / Number(totalPower)
+    : 0
+
+  // 主分红可领 = 主分红池实时余额 × 算力占比
+  const realtimeMain = mainPool > 0n
+    ? BigInt(Math.floor(myShareRatio * Number(mainPool)))
+    : 0n
+
+  // 王者池可领 = 王者池实时余额 × 算力占比（仅Lv10）
+  const realtimeDia = (isLv10 && diaPool > 0n)
+    ? BigInt(Math.floor(myShareRatio * Number(diaPool)))
+    : 0n
+
+  const realtimeTotal = realtimeMain + realtimeDia
+
+  // 安全上限：不超过合约总余额
+  const displayAmt  = realtimeTotal > contractBNB ? contractBNB : realtimeTotal
+  const displayMain = realtimeMain > contractBNB ? contractBNB : realtimeMain
+  const displayDia  = realtimeDia > (contractBNB - displayMain) ? (contractBNB - displayMain) : realtimeDia
+
+  const sharePct    = myShareRatio > 0 ? (myShareRatio * 100).toFixed(2) : '0.00'
+  const hasPool     = mainPool > 0n || diaPool > 0n
+  const canClaim    = contractBNB > 0n && displayAmt > 0n
 
   return (
     <div className="panel user-panel">
@@ -160,25 +169,25 @@ export function UserPanel() {
         <div className="reward-card main-card">
           <div className="rc-label">主分红可领</div>
           <div className="rc-val blue">{fmt.bnb(displayMain)}</div>
-          <div className="rc-unit">BNB · 每2小时</div>
+          <div className="rc-unit">= 主分红池 × {sharePct}%</div>
         </div>
         <div className="reward-card dia-card">
           <div className="rc-label">🐜 蚁后可领</div>
           <div className="rc-val diamond">{fmt.bnb(displayDia)}</div>
-          <div className="rc-unit">{isLv10 ? 'BNB · Lv10专属' : '升至Lv10解锁'}</div>
+          <div className="rc-unit">{isLv10 ? `= 王者池 × ${sharePct}%` : '升至Lv10解锁'}</div>
         </div>
       </div>
 
-      {/* 受限提示：链上有更多待领，但合约暂时余额不足 */}
-      {isLimited && (
-        <div className="warn-box warn-yellow">
-          💡 你的累计待领 {fmt.bnb(totalPend)} BNB，当前受合约余额限制，实际可领 {fmt.bnb(displayAmt)} BNB，剩余待领将在下次分红补充后可领
+      {/* 分红池有钱但合约余额少时提示 */}
+      {hasPool && contractBNB === 0n && (
+        <div className="warn-box warn-red">
+          ⚠️ 合约暂无可用余额，领取暂时不可用
         </div>
       )}
 
-      {!hasVaultFunds && (
-        <div className="warn-box warn-red">
-          ⚠️ 分红池暂无资金，领取暂时不可用，请等待资金补充
+      {!hasPool && (
+        <div className="warn-box warn-yellow">
+          💡 分红池暂无资金，等待下次税收注入后可领取
         </div>
       )}
 
