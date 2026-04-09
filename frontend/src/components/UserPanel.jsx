@@ -5,16 +5,9 @@ import { useUserInfo, useVaultWrite, useGlobalStats } from '../hooks/useVault'
 import { fmt, LEVEL_DATA, LEVEL_THRESHOLDS } from '../utils'
 import { useEffect, useState } from 'react'
 
-// getUserInfo 返回顺序（AntVault v5/v6）:
-// [0] totalBalance_  [1] level_  [2] oldestHeldHours_  [3] power_
-// [4] pendingMain_   [5] pendingDia_  [6] totalClaimed_  [7] positionCount_
-// getLevelInfo: [0] level_  [1] levelName_  [2] multiplier_  [3] heldHours_  [4] nextLevelHours_
-// getGlobalStats: [0] totalPower_ ...
-
 function LevelBadge({ lv }) {
-  const isDiamond = lv >= 7
   return (
-    <div className={`level-badge ${isDiamond ? 'diamond' : ''}`}>
+    <div className={`level-badge ${lv >= 7 ? 'diamond' : ''}`}>
       <span className="lv-num">{lv}</span>
       <span className="lv-label">LEVEL</span>
       {lv === 10 && <span className="lv-crown">🐜</span>}
@@ -25,9 +18,7 @@ function LevelBadge({ lv }) {
 function LvProgress({ heldHours, lv }) {
   const cur  = LEVEL_THRESHOLDS[lv - 1] || 0
   const next = LEVEL_THRESHOLDS[lv]     || 0
-  const pct  = lv >= 10
-    ? 100
-    : Math.min(100, ((Number(heldHours) - cur) / (next - cur)) * 100)
+  const pct  = lv >= 10 ? 100 : Math.min(100, ((Number(heldHours) - cur) / (next - cur)) * 100)
   return (
     <div className="progress-wrap">
       <div className="progress-labels">
@@ -35,10 +26,7 @@ function LvProgress({ heldHours, lv }) {
         <span>{lv < 10 ? `升级需: ${next}h` : '已达顶级 🐜'}</span>
       </div>
       <div className="progress-track">
-        <div
-          className={`progress-fill ${lv >= 10 ? 'gold' : ''}`}
-          style={{ width: pct + '%' }}
-        />
+        <div className={`progress-fill ${lv >= 10 ? 'gold' : ''}`} style={{ width: pct + '%' }} />
       </div>
     </div>
   )
@@ -52,39 +40,30 @@ export function UserPanel() {
   const [toast, setToast] = useState(null)
 
   useEffect(() => {
-    if (isSuccess) {
-      setToast({ msg: '交易成功 ✓', type: 'success' })
-      refetch()
-      setTimeout(() => setToast(null), 3000)
-    }
+    if (isSuccess) { setToast({ msg: '交易成功 ✓', type: 'success' }); refetch(); setTimeout(() => setToast(null), 3000) }
   }, [isSuccess])
-
   useEffect(() => {
     if (isPending)         setToast({ msg: '等待钱包签名…', type: 'info' })
     else if (isConfirming) setToast({ msg: '链上确认中…',   type: 'info' })
   }, [isPending, isConfirming])
 
-  if (!isConnected) {
-    return (
-      <div className="panel user-panel">
-        <div className="panel-title"><span>👤</span> 我的账户</div>
-        <div className="connect-cta">
-          <div className="connect-icon">🐜</div>
-          <p>连接钱包，开始累积蚁群算力</p>
-          <div className="rainbow-wrap"><ConnectButton /></div>
-        </div>
+  if (!isConnected) return (
+    <div className="panel user-panel">
+      <div className="panel-title"><span>👤</span> 我的账户</div>
+      <div className="connect-cta">
+        <div className="connect-icon">🐜</div>
+        <p>连接钱包，开始累积蚁群算力</p>
+        <div className="rainbow-wrap"><ConnectButton /></div>
       </div>
-    )
-  }
+    </div>
+  )
 
-  if (isLoading) {
-    return (
-      <div className="panel user-panel">
-        <div className="panel-title"><span>👤</span> 我的账户</div>
-        <div className="loading-box">加载中…</div>
-      </div>
-    )
-  }
+  if (isLoading) return (
+    <div className="panel user-panel">
+      <div className="panel-title"><span>👤</span> 我的账户</div>
+      <div className="loading-box">加载中…</div>
+    </div>
+  )
 
   if (!isRegistered) {
     const hasBal = tokenBal && tokenBal > 0n
@@ -96,11 +75,7 @@ export function UserPanel() {
             <div className="rc-icon">🚀</div>
             <p>你持有 <strong className="hl">{fmt.token(tokenBal)} 蚁群</strong></p>
             <p className="sub">注册参与算力分红系统</p>
-            <button
-              className="btn btn-primary"
-              onClick={register}
-              disabled={isPending || isConfirming}
-            >
+            <button className="btn btn-primary" onClick={register} disabled={isPending || isConfirming}>
               {isPending || isConfirming ? '处理中…' : '🐜 注册参与分红'}
             </button>
             <div className="info-box">持币满1小时后开始累积算力，持续持有即可自动升级</div>
@@ -117,6 +92,7 @@ export function UserPanel() {
     )
   }
 
+  // getUserInfo: [totalBalance, level, oldestHeldHours, power, pendingMain, pendingDia, totalClaimed, positionCount]
   const balance   = userInfo?.[0] ?? 0n
   const lv        = userInfo ? Number(userInfo[1]) : 1
   const heldHours = userInfo?.[2] ?? 0n
@@ -128,12 +104,18 @@ export function UserPanel() {
   const lvName = levelInfo?.[1] ?? '—'
   const mult   = levelInfo ? Number(levelInfo[2]) : 10
 
-  const totalPower = globalStats?.[0] ?? 0n
-  const sharePct   = totalPower > 0n && power > 0n
-    ? ((Number(power) / Number(totalPower)) * 100).toFixed(2)
-    : '0.00'
+  const totalPower  = globalStats?.[0] ?? 0n
+  // contractBNB 是 globalStats[9]，用于判断合约是否有钱
+  const contractBNB = globalStats?.[9] ?? 0n
+  const hasVaultFunds = contractBNB > 0n
 
+  const sharePct = totalPower > 0n && power > 0n
+    ? ((Number(power) / Number(totalPower)) * 100).toFixed(2) : '0.00'
+
+  // 实际可领：不超过合约余额
   const totalPend = pendMain + pendDia
+  const claimable = totalPend > contractBNB ? contractBNB : totalPend
+  const canClaim  = hasVaultFunds && claimable > 0n
 
   return (
     <div className="panel user-panel">
@@ -175,19 +157,23 @@ export function UserPanel() {
         </div>
       </div>
 
+      {/* 合约余额不足时显示提示 */}
+      {!hasVaultFunds && (
+        <div className="warn-box warn-red">
+          ⚠️ 合约暂无 BNB，领取暂时不可用，请等待资金补充
+        </div>
+      )}
+
       <div className="btn-row">
         <button
           className="btn btn-gold"
           onClick={claim}
-          disabled={isPending || isConfirming || totalPend === 0n}
+          disabled={!canClaim || isPending || isConfirming}
+          title={!hasVaultFunds ? '合约暂无BNB，请等待补充' : ''}
         >
-          {isPending || isConfirming ? '处理中…' : `🏆 领取 ${fmt.bnb(totalPend)} BNB`}
+          {isPending || isConfirming ? '处理中…' : canClaim ? `🏆 领取 ${fmt.bnb(claimable)} BNB` : '暂无可领'}
         </button>
-        <button
-          className="btn btn-outline"
-          onClick={syncBalance}
-          disabled={isPending || isConfirming}
-        >
+        <button className="btn btn-outline" onClick={syncBalance} disabled={isPending || isConfirming}>
           🔄 同步余额
         </button>
       </div>

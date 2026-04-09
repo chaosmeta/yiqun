@@ -4,43 +4,28 @@ import { GlobalStats } from './components/GlobalStats'
 import { UserPanel }   from './components/UserPanel'
 import { LevelTable }  from './components/LevelTable'
 import { FeePanel }    from './components/FeePanel'
+import { OwnerPanel }  from './components/OwnerPanel'
 
 export default function App() {
   return (
     <div className="app">
-      {/* ── Header ── */}
       <header className="header">
         <div className="header-inner">
           <div className="logo">
-            <img
-              src="/ant-logo.png"
-              alt="蚁群"
-              className="logo-img"
-              onError={e => { e.target.style.display='none' }}
-            />
+            <img src="/ant-logo.png" alt="蚁群" className="logo-img"
+              onError={e => { e.target.style.display='none' }} />
             <span className="logo-text">蚁群</span>
           </div>
-          <div className="network-badge">
-            <span className="net-dot" />
-            BSC
-          </div>
-          <ConnectButton
-            chainStatus="icon"
-            showBalance={false}
-            accountStatus="avatar"
-          />
+          <div className="network-badge"><span className="net-dot" />BSC</div>
+          <ConnectButton chainStatus="icon" showBalance={false} accountStatus="avatar" />
         </div>
       </header>
 
-      {/* ── Hero ── */}
       <div className="hero">
         <h1 className="hero-title">蚁群分红协议</h1>
-        <p className="hero-sub">
-          持币越久 · 算力越强 · 分红越多 · <em>卖出清零</em>
-        </p>
+        <p className="hero-sub">持币越久 · 算力越强 · 分红越多 · <em>卖出清零</em></p>
       </div>
 
-      {/* ── Main ── */}
       <main className="container">
         <GlobalStats />
         <div className="main-grid">
@@ -48,6 +33,8 @@ export default function App() {
           <LevelTable />
         </div>
         <FeePanel />
+        {/* Owner 管理面板：连接钱包后自动显示，非Owner调用会被合约拒绝 */}
+        <OwnerPanel />
       </main>
 
       <footer className="footer">

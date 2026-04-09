@@ -1,6 +1,5 @@
 // src/components/GlobalStats.jsx
-import { useGlobalStats } from '../hooks/useVault'
-import { useVaultWrite } from '../hooks/useVault'
+import { useGlobalStats, useVaultWrite } from '../hooks/useVault'
 import { fmt } from '../utils'
 
 function StatCard({ label, value, sub, color = 'blue' }) {
@@ -22,35 +21,40 @@ export function GlobalStats() {
   const now      = Math.floor(Date.now() / 1000)
   const nextMain = s ? Number(s[7]) - now : 0
 
+  // contractBNB 是 s[9]
+  const contractBNB = s ? s[9] : 0n
+  const mainPool    = s ? s[1] : 0n
+  const noFunds     = contractBNB === 0n || contractBNB < mainPool
+
   return (
     <section className="global-section">
-      {/* 第一行：核心指标 */}
+
+      {/* 合约余额不足警告 */}
+      {noFunds && s && (
+        <div className="warn-banner">
+          ⚠️ 合约 BNB 余额不足，当前可用 {fmt.bnb(contractBNB)} BNB，分红领取暂时不可用，请等待补充
+        </div>
+      )}
+
       <div className="stats-grid">
-        <StatCard label="全网算力"        value={s ? fmt.power(s[0])   : '—'} color="blue"    />
-        <StatCard label="持有用户"         value={s ? s[6].toString()   : '—'} color="gold"    />
-        <StatCard label="主分红池"         value={s ? fmt.bnb(s[1])     : '—'} sub="BNB" color="green"   />
-        <StatCard label="💎 王者池"        value={s ? fmt.bnb(s[2])     : '—'} sub="BNB" color="diamond" />
+        <StatCard label="全网算力"   value={s ? fmt.power(s[0]) : '—'} color="blue"    />
+        <StatCard label="持有用户"   value={s ? s[6].toString() : '—'} color="gold"    />
+        <StatCard label="主分红池"   value={s ? fmt.bnb(s[1])   : '—'} sub="BNB" color="green"   />
+        <StatCard label="🐜 王者池"  value={s ? fmt.bnb(s[2])   : '—'} sub="BNB" color="diamond" />
       </div>
 
-      {/* 第二行：累计数据 + 回购 + 倒计时 */}
       <div className="pool-row">
         <div className="pool-card">
-          <div className="pc-label">📦 总分红已发</div>
-          <div className="pc-value blue">
-            {s ? fmt.bnb(s[3] + s[4]) : '—'} <span>BNB</span>
-          </div>
+          <div className="pc-label">💰 合约总余额</div>
+          <div className="pc-value blue">{s ? fmt.bnb(contractBNB) : '—'} <span>BNB</span></div>
+          <div className="pc-sub">实际可用余额</div>
         </div>
 
-        {/* 回购销毁：BNB 数量 + 代币数量 */}
         <div className="pool-card">
           <div className="pc-label">🔥 回购销毁</div>
-          <div className="pc-value red">
-            {s ? fmt.bnb(s[5]) : '—'} <span>BNB</span>
-          </div>
+          <div className="pc-value red">{s ? fmt.bnb(s[5]) : '—'} <span>BNB</span></div>
           {burnedTokens != null && (
-            <div className="pc-sub burn-token">
-              ≈ {fmt.token(burnedTokens)} 代币已销毁
-            </div>
+            <div className="pc-sub burn-token">≈ {fmt.token(burnedTokens)} 蚁群已销毁</div>
           )}
         </div>
 
@@ -61,11 +65,7 @@ export function GlobalStats() {
         </div>
 
         <div className="pool-card">
-          <button
-            className="trigger-btn"
-            onClick={triggerDistribution}
-            disabled={isPending}
-          >
+          <button className="trigger-btn" onClick={triggerDistribution} disabled={isPending}>
             {isPending ? '提交中…' : '⚡ 触发分红'}
           </button>
           <div className="pc-sub">任何人可触发</div>
