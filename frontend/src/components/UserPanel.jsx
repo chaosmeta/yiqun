@@ -104,18 +104,36 @@ export function UserPanel() {
   const lvName = levelInfo?.[1] ?? '—'
   const mult   = levelInfo ? Number(levelInfo[2]) : 10
 
+  // 全网算力 & 合约余额
   const totalPower  = globalStats?.[0] ?? 0n
-  // contractBNB 是 globalStats[9]，用于判断合约是否有钱
-  const contractBNB = globalStats?.[9] ?? 0n
-  const hasVaultFunds = contractBNB > 0n
+  const mainPool    = globalStats?.[1] ?? 0n   // 主分红池
+  const diaPool     = globalStats?.[2] ?? 0n   // 王者池
+  const contractBNB = globalStats?.[9] ?? 0n   // 合约实际余额
 
   const sharePct = totalPower > 0n && power > 0n
     ? ((Number(power) / Number(totalPower)) * 100).toFixed(2) : '0.00'
 
-  // 实际可领：不超过合约余额
-  const totalPend = pendMain + pendDia
-  const claimable = totalPend > contractBNB ? contractBNB : totalPend
-  const canClaim  = hasVaultFunds && claimable > 0n
+  // ── 核心修复：按比例计算实际可领 ──────────────────────────────
+  // 原理：合约里的钱是有限的，用户实际能领的 = 分红池 × (我的算力占比)
+  // 这样不管待领数字叠加多高，显示的都是合约里实际属于你的那份
+  const myShare = totalPower > 0n && power > 0n
+    ? Number(power) / Number(totalPower) : 0
+
+  // 主分红：按算力占比 × 主分红池
+  const claimableMain = mainPool > 0n
+    ? BigInt(Math.floor(myShare * Number(mainPool))) : 0n
+
+  // 王者池：Lv10才有，按算力占比 × 王者池
+  const isLv10 = lv === 10
+  const claimableDia = (isLv10 && diaPool > 0n)
+    ? BigInt(Math.floor(myShare * Number(diaPool))) : 0n
+
+  // 总可领（不超过合约余额）
+  const claimableTotal = claimableMain + claimableDia
+  const safeClaimable  = claimableTotal > contractBNB ? contractBNB : claimableTotal
+
+  const hasVaultFunds = contractBNB > 0n && mainPool > 0n
+  const canClaim = hasVaultFunds && safeClaimable > 0n
 
   return (
     <div className="panel user-panel">
@@ -146,21 +164,20 @@ export function UserPanel() {
 
       <div className="reward-grid">
         <div className="reward-card main-card">
-          <div className="rc-label">主分红待领</div>
-          <div className="rc-val blue">{fmt.bnb(pendMain)}</div>
-          <div className="rc-unit">BNB · 每2小时</div>
+          <div className="rc-label">主分红可领</div>
+          <div className="rc-val blue">{fmt.bnb(claimableMain)}</div>
+          <div className="rc-unit">BNB · 按算力占比</div>
         </div>
         <div className="reward-card dia-card">
-          <div className="rc-label">🐜 蚁后额外</div>
-          <div className="rc-val diamond">{fmt.bnb(pendDia)}</div>
-          <div className="rc-unit">BNB · 每48小时</div>
+          <div className="rc-label">🐜 蚁后可领</div>
+          <div className="rc-val diamond">{fmt.bnb(claimableDia)}</div>
+          <div className="rc-unit">{isLv10 ? 'BNB · Lv10专属' : '升至Lv10解锁'}</div>
         </div>
       </div>
 
-      {/* 合约余额不足时显示提示 */}
       {!hasVaultFunds && (
         <div className="warn-box warn-red">
-          ⚠️ 合约暂无 BNB，领取暂时不可用，请等待资金补充
+          ⚠️ 分红池暂无资金，领取暂时不可用，请等待资金补充
         </div>
       )}
 
@@ -169,9 +186,13 @@ export function UserPanel() {
           className="btn btn-gold"
           onClick={claim}
           disabled={!canClaim || isPending || isConfirming}
-          title={!hasVaultFunds ? '合约暂无BNB，请等待补充' : ''}
+          title={!hasVaultFunds ? '分红池暂无BNB' : ''}
         >
-          {isPending || isConfirming ? '处理中…' : canClaim ? `🏆 领取 ${fmt.bnb(claimable)} BNB` : '暂无可领'}
+          {isPending || isConfirming
+            ? '处理中…'
+            : canClaim
+              ? `🏆 领取 ${fmt.bnb(safeClaimable)} BNB`
+              : '暂无可领'}
         </button>
         <button className="btn btn-outline" onClick={syncBalance} disabled={isPending || isConfirming}>
           🔄 同步余额
